@@ -1,13 +1,9 @@
 pipeline {
     agent any
     
-    environment {
-        JAVA_HOME = 'D:\\jdk-21_windows-x64_bin\\jdk-21.0.6'
-        PATH = "${JAVA_HOME}\\bin;${env.PATH}"
-    }
-    
     tools {
-        maven 'Maven' // Configure this in Jenkins Global Tool Configuration
+        maven 'Maven'
+        jdk 'JDK 21'
     }
     
     stages {
