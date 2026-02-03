@@ -3,7 +3,6 @@ pipeline {
     
     tools {
         maven 'Maven'
-        jdk 'JDK 21'
     }
     
     stages {
@@ -11,6 +10,10 @@ pipeline {
             steps {
                 echo 'Checking out source code...'
                 checkout scm
+                // Check available Java
+                sh 'java -version || echo "Java not found in PATH"'
+                sh 'echo "PATH: $PATH"'
+                sh 'which java || echo "Java executable not found"'
             }
         }
         
