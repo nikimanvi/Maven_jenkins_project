@@ -1,6 +1,13 @@
 pipeline {
     agent any
     
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'staging', 'production'], description: 'Select deployment environment')
+        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip running tests?')
+        string(name: 'BRANCH_NAME', defaultValue: 'nikithabranch1', description: 'Branch to build')
+        text(name: 'DEPLOY_NOTES', defaultValue: '', description: 'Deployment notes (optional)')
+    }
+    
     tools {
         maven 'Maven'
     }
@@ -9,15 +16,18 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo 'Checking out source code...'
+                echo "Environment: ${params.ENVIRONMENT}"
+                echo "Skip Tests: ${params.SKIP_TESTS}"
+                echo "Branch: ${params.BRANCH_NAME}"
+                echo "Deploy Notes: ${params.DEPLOY_NOTES}"
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: '*/nikithabranch1']],
+                    branches: [[name: "*/${params.BRANCH_NAME}"]],
                     userRemoteConfigs: [[
                         url: 'https://github.com/nikimanvi/Maven_jenkins_project.git',
-                        credentialsId: 'GITHUB_PATLatest'  // Use the credential ID from Jenkins
+                        credentialsId: 'GITHUB_PATLatest'
                     ]]
                 ])
-                // Check available Java
                 bat 'java -version || echo "Java not found in PATH"'
                 bat 'echo PATH: %PATH%'
             }
@@ -31,6 +41,9 @@ pipeline {
         }
         
         stage('Test') {
+            when {
+                expression { params.SKIP_TESTS == false }
+            }
             steps {
                 echo 'Running tests...'
                 bat 'mvn test'
@@ -53,6 +66,21 @@ pipeline {
             steps {
                 echo 'Archiving artifacts...'
                 archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                echo "Deploying to ${params.ENVIRONMENT} environment..."
+                script {
+                    if (params.ENVIRONMENT == 'production') {
+                        echo '⚠️ PRODUCTION DEPLOYMENT!'
+                        echo 'Deploy notes: ' + params.DEPLOY_NOTES
+                    } else {
+                        echo "Deploying to ${params.ENVIRONMENT}..."
+                    }
+                }
+                echo 'Deployment completed!'
             }
         }
     }
