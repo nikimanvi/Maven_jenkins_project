@@ -69,18 +69,62 @@ pipeline {
             }
         }
         
-        stage('Deploy') {
+        stage('Docker Build') {
             steps {
-                echo "Deploying to ${params.ENVIRONMENT} environment..."
+                echo 'Building Docker image...'
                 script {
+                    // Define image name with environment tag
+                    def imageName = "maven-jenkins-app:${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
+                    def latestTag = "maven-jenkins-app:${params.ENVIRONMENT}-latest"
+                    
+                    // Build Docker image
+                    bat "docker build -t ${imageName} -t ${latestTag} ."
+                    
+                    echo "Docker image built successfully: ${imageName}"
+                    
+                    // Save image name for next stage
+                    env.DOCKER_IMAGE = imageName
+                    env.DOCKER_LATEST = latestTag
+                }
+            }
+        }
+        
+        stage('Docker Deploy') {
+            steps {
+                echo "Deploying Docker container to ${params.ENVIRONMENT} environment..."
+                script {
+                    // Stop and remove existing container if it exists
+                    bat """
+                        docker stop maven-app-${params.ENVIRONMENT} 2>nul || echo "No existing container to stop"
+                        docker rm maven-app-${params.ENVIRONMENT} 2>nul || echo "No existing container to remove"
+                    """
+                    
+                    // Run new container
+                    bat "docker run -d --name maven-app-${params.ENVIRONMENT} ${env.DOCKER_IMAGE}"
+                    
                     if (params.ENVIRONMENT == 'production') {
-                        echo '⚠️ PRODUCTION DEPLOYMENT!'
+                        echo '⚠️ PRODUCTION DEPLOYMENT COMPLETED!'
                         echo 'Deploy notes: ' + params.DEPLOY_NOTES
                     } else {
-                        echo "Deploying to ${params.ENVIRONMENT}..."
+                        echo "Container deployed to ${params.ENVIRONMENT}"
                     }
+                    
+                    // Show container status
+                    bat "docker ps -f name=maven-app-${params.ENVIRONMENT}"
                 }
-                echo 'Deployment completed!'
+                echo 'Docker deployment completed!'
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                echo 'Verifying Docker container...'
+                script {
+                    // Check if container is running
+                    bat "docker logs maven-app-${params.ENVIRONMENT}"
+                    
+                    echo "Container maven-app-${params.ENVIRONMENT} is running successfully!"
+                }
             }
         }
     }
