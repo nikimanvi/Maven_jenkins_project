@@ -4,6 +4,8 @@ pipeline {
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'staging', 'production'], description: 'Select deployment environment')
         booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip running tests?')
+        booleanParam(name: 'SKIP_DEPLOYMENT', defaultValue: true, description: 'Skip Docker deployment? (Only build image)')
+        booleanParam(name: 'PUSH_TO_DOCKERHUB', defaultValue: false, description: 'Push image to Docker Hub?')
         string(name: 'BRANCH_NAME', defaultValue: 'nikithabranch1', description: 'Branch to build')
         text(name: 'DEPLOY_NOTES', defaultValue: '', description: 'Deployment notes (optional)')
     }
@@ -73,23 +75,68 @@ pipeline {
             steps {
                 echo 'Building Docker image...'
                 script {
-                    // Define image name with environment tag
-                    def imageName = "maven-jenkins-app:${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
-                    def latestTag = "maven-jenkins-app:${params.ENVIRONMENT}-latest"
+                    // Docker Hub username
+                    def dockerHubUser = "nikithamanvi"
                     
-                    // Build Docker image
-                    bat "docker build -t ${imageName} -t ${latestTag} ."
+                    // Define image names with Docker Hub username for registry push
+                    def imageName = "${dockerHubUser}/maven-jenkins-app:${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
+                    def latestTag = "${dockerHubUser}/maven-jenkins-app:${params.ENVIRONMENT}-latest"
+                    
+                    // Also create local tags without username for local use
+                    def localImage = "maven-jenkins-app:${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
+                    def localLatest = "maven-jenkins-app:${params.ENVIRONMENT}-latest"
+                    
+                    // Build Docker image with all tags
+                    bat "docker build -t ${imageName} -t ${latestTag} -t ${localImage} -t ${localLatest} ."
                     
                     echo "Docker image built successfully: ${imageName}"
                     
-                    // Save image name for next stage
+                    // Save image names for next stages
                     env.DOCKER_IMAGE = imageName
                     env.DOCKER_LATEST = latestTag
+                    env.LOCAL_IMAGE = localImage
+                }
+            }
+        }
+        
+        stage('Push to Docker Hub') {
+            when {
+                expression { params.PUSH_TO_DOCKERHUB == true }
+            }
+            steps {
+                echo 'Pushing Docker image to Docker Hub...'
+                script {
+                    // Login to Docker Hub using Jenkins credentials
+                    withCredentials([usernamePassword(
+                        credentialsId: 'docker-hub-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        // Login to Docker Hub
+                        bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
+                        
+                        // Push both tags
+                        bat "docker push ${env.DOCKER_IMAGE}"
+                        bat "docker push ${env.DOCKER_LATEST}"
+                        
+                        echo "✅ Images pushed successfully to Docker Hub!"
+                        echo "- ${env.DOCKER_IMAGE}"
+                        echo "- ${env.DOCKER_LATEST}"
+                        echo ""
+                        echo "Anyone can now pull your image with:"
+                        echo "docker pull ${env.DOCKER_IMAGE}"
+                        
+                        // Logout for security
+                        bat "docker logout"
+                    }
                 }
             }
         }
         
         stage('Docker Deploy') {
+            when {
+                expression { params.SKIP_DEPLOYMENT == false }
+            }
             steps {
                 echo "Deploying Docker container to ${params.ENVIRONMENT} environment..."
                 script {
@@ -99,8 +146,9 @@ pipeline {
                         docker rm maven-app-${params.ENVIRONMENT} 2>nul || echo "No existing container to remove"
                     """
                     
-                    // Run new container
-                    bat "docker run -d --name maven-app-${params.ENVIRONMENT} ${env.DOCKER_IMAGE}"
+                    // Run new container (non-detached for apps that exit immediately)
+                    // Use local image tag for deployment
+                    bat "docker run --name maven-app-${params.ENVIRONMENT} ${env.LOCAL_IMAGE}"
                     
                     if (params.ENVIRONMENT == 'production') {
                         echo '⚠️ PRODUCTION DEPLOYMENT COMPLETED!'
@@ -108,22 +156,22 @@ pipeline {
                     } else {
                         echo "Container deployed to ${params.ENVIRONMENT}"
                     }
-                    
-                    // Show container status
-                    bat "docker ps -f name=maven-app-${params.ENVIRONMENT}"
                 }
                 echo 'Docker deployment completed!'
             }
         }
         
         stage('Verify Deployment') {
+            when {
+                expression { params.SKIP_DEPLOYMENT == false }
+            }
             steps {
                 echo 'Verifying Docker container...'
                 script {
-                    // Check if container is running
+                    // Check if container ran successfully
                     bat "docker logs maven-app-${params.ENVIRONMENT}"
                     
-                    echo "Container maven-app-${params.ENVIRONMENT} is running successfully!"
+                    echo "Container maven-app-${params.ENVIRONMENT} executed successfully!"
                 }
             }
         }
